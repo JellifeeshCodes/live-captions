@@ -3,48 +3,85 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ClearCast v2 - Fix</title>
+    <title>ClearCast Pro - Live Captions</title>
     <style>
-        :root { --bg: #f8f9fa; --primary: #5c67f2; --text: #2d3436; }
-        body { font-family: sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 40px; }
-        .container { width: 100%; max-width: 800px; background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); text-align: center; }
-        canvas { width: 100%; height: 100px; background: #eee; border-radius: 10px; margin-bottom: 20px; }
-        #caption-box { min-height: 200px; padding: 20px; border: 2px solid #eee; border-radius: 10px; text-align: left; font-size: 1.3rem; margin-bottom: 20px; overflow-y: auto; }
-        button { padding: 12px 30px; border: none; border-radius: 8px; background: var(--primary); color: white; cursor: pointer; font-weight: bold; }
-        button:disabled { background: #ccc; }
-        .status-dot { height: 10px; width: 10px; background-color: #bbb; border-radius: 50%; display: inline-block; margin-right: 5px; }
-        .active-dot { background-color: #4cd137; box-shadow: 0 0 8px #4cd137; }
+        :root {
+            --bg: #f8f9fa; --card: #ffffff; --text: #2d3436;
+            --primary: #5c67f2; --accent: #f1f3f5;
+        }
+        [data-theme="dark"] {
+            --bg: #121212; --card: #1e1e1e; --text: #e0e0e0;
+            --primary: #8a94ff; --accent: #333;
+        }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background-color: var(--bg); color: var(--text);
+            display: flex; justify-content: center; margin: 0; padding: 20px;
+            transition: background 0.3s ease;
+        }
+        .container {
+            width: 100%; max-width: 800px; background: var(--card);
+            padding: 30px; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        canvas { width: 100%; height: 100px; background: var(--accent); border-radius: 12px; margin-bottom: 20px; }
+        #caption-box {
+            min-height: 250px; max-height: 400px; padding: 25px;
+            border: 2px solid var(--accent); border-radius: 12px;
+            overflow-y: auto; line-height: 1.6; font-size: 22px;
+            background: var(--card); margin-bottom: 20px;
+        }
+        .controls { display: flex; gap: 10px; flex-wrap: wrap; }
+        button {
+            padding: 12px 24px; border: none; border-radius: 8px;
+            background: var(--primary); color: white; font-weight: 600; cursor: pointer;
+        }
+        button:disabled { background: #888; }
+        #status { font-size: 0.85rem; margin-bottom: 10px; font-weight: bold; }
+        .setting-item { margin-top: 15px; font-size: 0.9rem; }
     </style>
 </head>
-<body>
+<body data-theme="light">
 
 <div class="container">
-    <h2>System Audio Captioner</h2>
+    <div class="header">
+        <h2 style="margin:0">ClearCast Pro</h2>
+        <button onclick="toggleTheme()" style="background: var(--accent); color: var(--text);">🌓 Toggle Theme</button>
+    </div>
+
+    <div id="status" style="color: #636e72;">Status: Standby</div>
     <canvas id="visualizer"></canvas>
     
     <div id="caption-box">
-        <div id="status-area" style="font-size: 0.8rem; margin-bottom: 10px; color: #636e72;">
-            <span class="status-dot" id="dot"></span> <span id="status-msg">Click start...</span>
-        </div>
-        <span id="final" style="color: #2d3436;"></span>
-        <span id="interim" style="color: #a0a0a0;"></span>
+        <span id="final"></span>
+        <span id="interim" style="opacity: 0.5;"></span>
     </div>
 
-    <button id="start-btn">Start Captions</button>
+    <div class="controls">
+        <button id="start-btn">🚀 Start Everything</button>
+        <button id="clear-btn" style="background:#ff7675">Clear Text</button>
+        <button id="copy-btn" style="background:#55efc4; color:#2d3436">Copy Text</button>
+    </div>
+
+    <div class="setting-item">
+        <label>Font Size: </label>
+        <input type="range" min="16" max="50" value="22" oninput="document.getElementById('caption-box').style.fontSize = this.value + 'px'">
+    </div>
 </div>
 
 <script>
     const startBtn = document.getElementById('start-btn');
     const finalSpan = document.getElementById('final');
     const interimSpan = document.getElementById('interim');
-    const dot = document.getElementById('dot');
-    const statusMsg = document.getElementById('status-msg');
+    const statusDiv = document.getElementById('status');
     const canvas = document.getElementById('visualizer');
-    const canvasCtx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d');
 
     let recognition;
     let audioCtx;
+    let isActive = false;
 
+    // --- 1. Speech Recognition Setup ---
     if ('webkitSpeechRecognition' in window) {
         recognition = new webkitSpeechRecognition();
         recognition.continuous = true;
@@ -52,65 +89,86 @@
         recognition.lang = 'en-US';
 
         recognition.onstart = () => {
-            dot.classList.add('active-dot');
-            statusMsg.innerText = "Listening to audio stream...";
+            statusDiv.innerText = "Status: 🟢 Listening (Speak or play audio)";
+            statusDiv.style.color = "#2ecc71";
+        };
+
+        recognition.onerror = (e) => {
+            statusDiv.innerText = "Status: 🔴 Error (" + e.error + ")";
+            if(e.error === 'not-allowed') alert("Please allow Microphone access for text to work!");
         };
 
         recognition.onresult = (event) => {
-            let interimTranscript = '';
+            let interim = '';
             for (let i = event.resultIndex; i < event.results.length; ++i) {
                 if (event.results[i].isFinal) {
                     finalSpan.innerHTML += event.results[i][0].transcript + ' ';
                 } else {
-                    interimTranscript += event.results[i][0].transcript;
+                    interim += event.results[i][0].transcript;
                 }
             }
-            interimSpan.innerHTML = interimTranscript;
+            interimSpan.innerHTML = interim;
+            const box = document.getElementById('caption-box');
+            box.scrollTop = box.scrollHeight;
         };
 
-        recognition.onend = () => {
-            // Auto-restart if it stops unexpectedly
-            if (startBtn.disabled) recognition.start();
-        };
+        recognition.onend = () => { if(isActive) recognition.start(); };
     }
 
+    // --- 2. Action Handlers ---
     startBtn.onclick = async () => {
         try {
-            // 1. Get System Audio
+            // Step A: Request Microphone (for the Text)
+            await navigator.mediaDevices.getUserMedia({ audio: true });
+            
+            // Step B: Request System Audio (for the Visualizer)
             const stream = await navigator.mediaDevices.getDisplayMedia({
-                video: { width: 1 }, 
-                audio: {
-                    echoCancellation: false,
-                    noiseSuppression: false,
-                    autoGainControl: false
-                }
+                video: { width: 1 }, audio: true
             });
 
-            // 2. Visualizer Logic
+            isActive = true;
+            startBtn.disabled = true;
+            recognition.start();
+
+            // Step C: Visualizer Logic
             audioCtx = new AudioContext();
             const source = audioCtx.createMediaStreamSource(stream);
             const analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 256;
             source.connect(analyser);
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            const data = new Uint8Array(analyser.frequencyBinCount);
 
             function draw() {
+                if(!isActive) return;
                 requestAnimationFrame(draw);
-                analyser.getByteFrequencyData(dataArray);
-                canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-                canvasCtx.fillStyle = '#5c67f2';
-                dataArray.forEach((val, i) => {
-                    canvasCtx.fillRect(i * 3, canvas.height - (val/2), 2, val/2);
+                analyser.getByteFrequencyData(data);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim();
+                data.forEach((v, i) => {
+                    const barHeight = v / 2;
+                    ctx.fillRect(i * 3, canvas.height - barHeight, 2, barHeight);
                 });
             }
             draw();
 
-            // 3. Start Recognition
-            recognition.start();
-            startBtn.disabled = true;
-
-        } catch (err) {
-            alert("Error: Make sure to select 'Share Audio' in the popup!");
+        } catch (e) {
+            statusDiv.innerText = "Status: ❌ Setup Failed";
+            console.error(e);
         }
+    };
+
+    function toggleTheme() {
+        const curr = document.body.getAttribute('data-theme');
+        document.body.setAttribute('data-theme', curr === 'dark' ? 'light' : 'dark');
+    }
+
+    document.getElementById('clear-btn').onclick = () => {
+        finalSpan.innerHTML = ""; interimSpan.innerHTML = "";
+    };
+
+    document.getElementById('copy-btn').onclick = () => {
+        navigator.clipboard.writeText(finalSpan.innerText);
+        alert("Text copied!");
     };
 </script>
 </body>
